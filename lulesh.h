@@ -1,6 +1,10 @@
-#if !defined(USE_MPI)
-# error "You should specify USE_MPI=0 or USE_MPI=1 on the compile line"
-#endif
+#pragma once
+
+#include "vector.h"
+
+#define LULESH_SHOW_PROGRESS 0
+#define DOUBLE_PRECISION
+// #define SAMI
 
 #if USE_MPI
 #include <mpi.h>
@@ -13,633 +17,418 @@
    SEDOV_SYNC_POS_VEL_LATE
 */
 
+// TODO: currently we support only early sync!
 #define SEDOV_SYNC_POS_VEL_EARLY 1
 #endif
 
-#include <math.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <vector>
+enum { VolumeError = -1, QStopError = -2, LFileError = -3 };
 
-//**************************************************
-// Allow flexibility for arithmetic representations 
-//**************************************************
+/* Could also support fixed point and interval arithmetic types */
+typedef float real4;
+typedef double real8;
 
-#define MAX(a, b) ( ((a) > (b)) ? (a) : (b))
+typedef int Index_t; /* array subscript and loop index */
+typedef int Int_t;   /* integer representation */
+#ifdef DOUBLE_PRECISION
+typedef real8 Real_t; /* floating point representation */
+#else
+typedef real4 Real_t; /* floating point representation */
+#endif
 
+class Domain {
 
-// Precision specification
-typedef float        real4 ;
-typedef double       real8 ;
-typedef long double  real10 ;  // 10 bytes on x86
+public:
+  void sortRegions(Vector_h<Int_t>& regReps_h, Vector_h<Index_t>& regSorted_h);
+  void CreateRegionIndexSets(Int_t nr, Int_t balance);
 
-typedef int32_t Int4_t ;
-typedef int64_t Int8_t ;
-typedef Int4_t  Index_t ; // array subscript and loop index
-typedef real8   Real_t ;  // floating point representation
-typedef Int4_t  Int_t ;   // integer representation
+  Index_t max_streams;
+  std::vector<cudaStream_t> streams;
 
-enum { VolumeError = -1, QStopError = -2 } ;
+  /* Elem-centered */
 
-inline real4  SQRT(real4  arg) { return sqrtf(arg) ; }
-inline real8  SQRT(real8  arg) { return sqrt(arg) ; }
-inline real10 SQRT(real10 arg) { return sqrtl(arg) ; }
+  Vector_d<Index_t> matElemlist; /* material indexset */
+  Vector_d<Index_t> nodelist;    /* elemToNode connectivity */
 
-inline real4  CBRT(real4  arg) { return cbrtf(arg) ; }
-inline real8  CBRT(real8  arg) { return cbrt(arg) ; }
-inline real10 CBRT(real10 arg) { return cbrtl(arg) ; }
+  Vector_d<Index_t> lxim; /* element connectivity through face */
+  Vector_d<Index_t> lxip;
+  Vector_d<Index_t> letam;
+  Vector_d<Index_t> letap;
+  Vector_d<Index_t> lzetam;
+  Vector_d<Index_t> lzetap;
 
-inline real4  FABS(real4  arg) { return fabsf(arg) ; }
-inline real8  FABS(real8  arg) { return fabs(arg) ; }
-inline real10 FABS(real10 arg) { return fabsl(arg) ; }
+  Vector_d<Int_t> elemBC; /* elem face symm/free-surf flag */
 
+  Vector_d<Real_t> e;   /* energy */
+  Vector_d<Real_t> d_e; /* change in energy */
 
-// Stuff needed for boundary conditions
-// 2 BCs on each of 6 hexahedral faces (12 bits)
-#define XI_M        0x00007
-#define XI_M_SYMM   0x00001
-#define XI_M_FREE   0x00002
-#define XI_M_COMM   0x00004
+  Vector_d<Real_t> p; /* pressure */
 
-#define XI_P        0x00038
-#define XI_P_SYMM   0x00008
-#define XI_P_FREE   0x00010
-#define XI_P_COMM   0x00020
+  Vector_d<Real_t> q;  /* q */
+  Vector_d<Real_t> ql; /* linear term for q */
+  Vector_d<Real_t> qq; /* quadratic term for q */
 
-#define ETA_M       0x001c0
-#define ETA_M_SYMM  0x00040
-#define ETA_M_FREE  0x00080
-#define ETA_M_COMM  0x00100
+  Vector_d<Real_t> v; /* relative volume */
 
-#define ETA_P       0x00e00
-#define ETA_P_SYMM  0x00200
-#define ETA_P_FREE  0x00400
-#define ETA_P_COMM  0x00800
+  Vector_d<Real_t> volo; /* reference volume */
+  Vector_d<Real_t> delv; /* m_vnew - m_v */
+  Vector_d<Real_t> vdov; /* volume derivative over volume */
 
-#define ZETA_M      0x07000
-#define ZETA_M_SYMM 0x01000
-#define ZETA_M_FREE 0x02000
-#define ZETA_M_COMM 0x04000
+  Vector_d<Real_t> arealg; /* char length of an element */
 
-#define ZETA_P      0x38000
-#define ZETA_P_SYMM 0x08000
-#define ZETA_P_FREE 0x10000
-#define ZETA_P_COMM 0x20000
+  Vector_d<Real_t> ss; /* "sound speed" */
 
-// MPI Message Tags
-#define MSG_COMM_SBN      1024
-#define MSG_SYNC_POS_VEL  2048
-#define MSG_MONOQ         3072
+  Vector_d<Real_t> elemMass; /* mass */
 
-#define MAX_FIELDS_PER_MPI_COMM 6
+  Vector_d<Real_t>* vnew; /* new relative volume -- temporary */
+
+  Vector_d<Real_t>* delv_xi; /* velocity gradient -- temporary */
+  Vector_d<Real_t>* delv_eta;
+  Vector_d<Real_t>* delv_zeta;
+
+  Vector_d<Real_t>* delx_xi; /* coordinate gradient -- temporary */
+  Vector_d<Real_t>* delx_eta;
+  Vector_d<Real_t>* delx_zeta;
+
+  Vector_d<Real_t>* dxx; /* principal strains -- temporary */
+  Vector_d<Real_t>* dyy;
+  Vector_d<Real_t>* dzz;
+
+  /* Node-centered */
+
+  Vector_d<Real_t> x; /* coordinates */
+  Vector_d<Real_t> y;
+  Vector_d<Real_t> z;
+
+  Vector_d<Real_t> xd; /* velocities */
+  Vector_d<Real_t> yd;
+  Vector_d<Real_t> zd;
+
+  Vector_d<Real_t> xdd; /* accelerations */
+  Vector_d<Real_t> ydd;
+  Vector_d<Real_t> zdd;
+
+  Vector_d<Real_t> fx; /* forces */
+  Vector_d<Real_t> fy;
+  Vector_d<Real_t> fz;
+
+  Vector_d<Real_t> dfx; /* AD of the forces */
+  Vector_d<Real_t> dfy;
+  Vector_d<Real_t> dfz;
+
+  Vector_d<Real_t> nodalMass;   /* mass */
+  Vector_h<Real_t> h_nodalMass; /* mass - host */
+
+  /* device pointers for comms */
+  Real_t* d_delv_xi; /* velocity gradient -- temporary */
+  Real_t* d_delv_eta;
+  Real_t* d_delv_zeta;
+
+  Real_t* d_x; /* coordinates */
+  Real_t* d_y;
+  Real_t* d_z;
+
+  Real_t* d_xd; /* velocities */
+  Real_t* d_yd;
+  Real_t* d_zd;
+
+  Real_t* d_fx; /* forces */
+  Real_t* d_fy;
+  Real_t* d_fz;
+
+  /* access elements for comms */
+  Real_t& get_delv_xi(Index_t idx) { return d_delv_xi[idx]; }
+  Real_t& get_delv_eta(Index_t idx) { return d_delv_eta[idx]; }
+  Real_t& get_delv_zeta(Index_t idx) { return d_delv_zeta[idx]; }
+
+  Real_t& get_x(Index_t idx) { return d_x[idx]; }
+  Real_t& get_y(Index_t idx) { return d_y[idx]; }
+  Real_t& get_z(Index_t idx) { return d_z[idx]; }
+
+  Real_t& get_xd(Index_t idx) { return d_xd[idx]; }
+  Real_t& get_yd(Index_t idx) { return d_yd[idx]; }
+  Real_t& get_zd(Index_t idx) { return d_zd[idx]; }
+
+  Real_t& get_fx(Index_t idx) { return d_fx[idx]; }
+  Real_t& get_fy(Index_t idx) { return d_fy[idx]; }
+  Real_t& get_fz(Index_t idx) { return d_fz[idx]; }
+
+  // host access
+  Real_t& get_nodalMass(Index_t idx) { return h_nodalMass[idx]; }
+
+  /* Boundary nodesets */
+
+  Vector_d<Index_t> symmX; /* symmetry plane nodesets */
+  Vector_d<Index_t> symmY;
+  Vector_d<Index_t> symmZ;
+
+  Vector_d<Int_t> nodeElemCount;
+  Vector_d<Int_t> nodeElemStart;
+  Vector_d<Index_t> nodeElemCornerList;
+
+  /* Parameters */
+
+  Real_t dtfixed; /* fixed time increment */
+  Real_t deltatimemultlb;
+  Real_t deltatimemultub;
+  Real_t stoptime; /* end time for simulation */
+  Real_t dtmax;    /* maximum allowable time increment */
+  Int_t cycle;     /* iteration count for simulation */
+
+  Real_t* dthydro_h;     /* hydro time constraint */
+  Real_t* d_dthydro_h;   /* AD change of the hydro time constraint */
+  Real_t* dtcourant_h;   /* courant time constraint */
+  Real_t* d_dtcourant_h; /* AD of the courant time constraint */
+  Index_t* bad_q_h;      /* flag to indicate Q error */
+  Index_t* bad_vol_h;    /* flag to indicate volume error */
+
+  /* cuda Events to indicate completion of certain kernels */
+  cudaEvent_t time_constraint_computed;
+
+  Real_t time_h;      /* current time */
+  Real_t deltatime_h; /* variable time increment */
+
+  Real_t u_cut;  /* velocity tolerance */
+  Real_t hgcoef; /* hourglass control */
+  Real_t qstop;  /* excessive q indicator */
+  Real_t monoq_max_slope;
+  Real_t monoq_limiter_mult;
+  Real_t e_cut; /* energy tolerance */
+  Real_t p_cut; /* pressure tolerance */
+  Real_t ss4o3;
+  Real_t q_cut;     /* q tolerance */
+  Real_t v_cut;     /* relative volume tolerance */
+  Real_t qlc_monoq; /* linear term coef for q */
+  Real_t qqc_monoq; /* quadratic term coef for q */
+  Real_t qqc;
+  Real_t eosvmax;
+  Real_t eosvmin;
+  Real_t pmin;    /* pressure floor */
+  Real_t emin;    /* energy floor */
+  Real_t dvovmax; /* maximum allowable volume change */
+  Real_t refdens; /* reference density */
+
+  Index_t m_colLoc;
+  Index_t m_rowLoc;
+  Index_t m_planeLoc;
+  Index_t m_tp;
+
+  Index_t& colLoc() { return m_colLoc; }
+  Index_t& rowLoc() { return m_rowLoc; }
+  Index_t& planeLoc() { return m_planeLoc; }
+  Index_t& tp() { return m_tp; }
+
+  Index_t sizeX;
+  Index_t sizeY;
+  Index_t sizeZ;
+  Index_t maxPlaneSize;
+  Index_t maxEdgeSize;
+
+  Index_t numElem;
+  Index_t padded_numElem;
+
+  Index_t numNode;
+  Index_t padded_numNode;
+
+  Index_t numSymmX;
+  Index_t numSymmY;
+  Index_t numSymmZ;
+
+  Index_t octantCorner;
+
+  // Region information
+  Int_t numReg;            // number of regions (def:11)
+  Int_t balance;           // Load balance between regions of a domain (def: 1)
+  Int_t cost;              // imbalance cost (def: 1)
+  Int_t* regElemSize;      // Size of region sets
+  Vector_d<Int_t> regCSR;  // records the begining and end of each region
+  Vector_d<Int_t> regReps; // records the rep number per region
+  Vector_d<Index_t> regNumList;  // Region number per domain element
+  Vector_d<Index_t> regElemlist; // region indexset
+  Vector_d<Index_t> regSorted;   // keeps index of sorted regions
+
+  //
+  // MPI-Related additional data
+  //
+
+  Index_t m_numRanks;
+  Index_t& numRanks() { return m_numRanks; }
+
+  void SetupCommBuffers(Int_t edgeNodes);
+  void BuildMesh(Int_t nx, Int_t edgeNodes, Int_t edgeElems, Int_t domNodes,
+                 Int_t padded_domElems, Vector_h<Real_t>& x_h,
+                 Vector_h<Real_t>& y_h, Vector_h<Real_t>& z_h,
+                 Vector_h<Int_t>& nodelist_h);
+
+  // Used in setup
+  Index_t m_rowMin, m_rowMax;
+  Index_t m_colMin, m_colMax;
+  Index_t m_planeMin, m_planeMax;
+
+#if USE_MPI
+  // Communication Work space
+  Real_t* commDataSend;
+  Real_t* commDataRecv;
+
+  Real_t* d_commDataSend;
+  Real_t* d_commDataRecv;
+
+  // Maximum number of block neighbors
+  MPI_Request recvRequest[26]; // 6 faces + 12 edges + 8 corners
+  MPI_Request sendRequest[26]; // 6 faces + 12 edges + 8 corners
+#endif
+};
+
+typedef Real_t& (Domain::*Domain_member)(Index_t);
 
 // Assume 128 byte coherence
 // Assume Real_t is an "integral power of 2" bytes wide
 #define CACHE_COHERENCE_PAD_REAL (128 / sizeof(Real_t))
 
-#define CACHE_ALIGN_REAL(n) \
-   (((n) + (CACHE_COHERENCE_PAD_REAL - 1)) & ~(CACHE_COHERENCE_PAD_REAL-1))
-
-/*********************************/
-/* Data structure implementation */
-/*********************************/
-
-/* might want to add access methods so that memory can be */
-/* better managed, as in luleshFT */
-
-template <typename T>
-T *Allocate(size_t size)
-{
-   return static_cast<T *>(malloc(sizeof(T)*size)) ;
-}
-
-template <typename T>
-void Release(T **ptr)
-{
-   if (*ptr != NULL) {
-      free(*ptr) ;
-      *ptr = NULL ;
-   }
-}
-
-//////////////////////////////////////////////////////
-// Primary data structure
-//////////////////////////////////////////////////////
-
-/*
- * The implementation of the data abstraction used for lulesh
- * resides entirely in the Domain class below.  You can change
- * grouping and interleaving of fields here to maximize data layout
- * efficiency for your underlying architecture or compiler.
- *
- * For example, fields can be implemented as STL objects or
- * raw array pointers.  As another example, individual fields
- * m_x, m_y, m_z could be budled into
- *
- *    struct { Real_t x, y, z ; } *m_coord ;
- *
- * allowing accessor functions such as
- *
- *  "Real_t &x(Index_t idx) { return m_coord[idx].x ; }"
- *  "Real_t &y(Index_t idx) { return m_coord[idx].y ; }"
- *  "Real_t &z(Index_t idx) { return m_coord[idx].z ; }"
- */
-
-class Domain {
-
-   public:
-
-   // Constructor
-   Domain(Int_t numRanks, Index_t colLoc,
-          Index_t rowLoc, Index_t planeLoc,
-          Index_t nx, Int_t tp, Int_t nr, Int_t balance, Int_t cost);
-
-   // Destructor
-   ~Domain();
-
-   //
-   // ALLOCATION
-   //
-
-   void AllocateNodePersistent(Int_t numNode) // Node-centered
-   {
-      m_x.resize(numNode);  // coordinates
-      m_y.resize(numNode);
-      m_z.resize(numNode);
-
-      m_xd.resize(numNode); // velocities
-      m_yd.resize(numNode);
-      m_zd.resize(numNode);
-
-      m_xdd.resize(numNode); // accelerations
-      m_ydd.resize(numNode);
-      m_zdd.resize(numNode);
-
-      m_fx.resize(numNode);  // forces
-      m_fy.resize(numNode);
-      m_fz.resize(numNode);
-
-      m_nodalMass.resize(numNode);  // mass
-   }
-
-   void AllocateElemPersistent(Int_t numElem) // Elem-centered
-   {
-      m_nodelist.resize(8*numElem);
-
-      // elem connectivities through face
-      m_lxim.resize(numElem);
-      m_lxip.resize(numElem);
-      m_letam.resize(numElem);
-      m_letap.resize(numElem);
-      m_lzetam.resize(numElem);
-      m_lzetap.resize(numElem);
-
-      m_elemBC.resize(numElem);
-
-      m_e.resize(numElem);
-      m_p.resize(numElem);
-
-      m_q.resize(numElem);
-      m_ql.resize(numElem);
-      m_qq.resize(numElem);
-
-      m_v.resize(numElem);
-
-      m_volo.resize(numElem);
-      m_delv.resize(numElem);
-      m_vdov.resize(numElem);
-
-      m_arealg.resize(numElem);
-
-      m_ss.resize(numElem);
-
-      m_elemMass.resize(numElem);
-
-      m_vnew.resize(numElem) ;
-   }
-
-   void AllocateGradients(Int_t numElem, Int_t allElem)
-   {
-      // Position gradients
-      m_delx_xi   = Allocate<Real_t>(numElem) ;
-      m_delx_eta  = Allocate<Real_t>(numElem) ;
-      m_delx_zeta = Allocate<Real_t>(numElem) ;
-
-      // Velocity gradients
-      m_delv_xi   = Allocate<Real_t>(allElem) ;
-      m_delv_eta  = Allocate<Real_t>(allElem);
-      m_delv_zeta = Allocate<Real_t>(allElem) ;
-   }
-
-   void DeallocateGradients()
-   {
-      Release(&m_delx_zeta);
-      Release(&m_delx_eta) ;
-      Release(&m_delx_xi)  ;
-
-      Release(&m_delv_zeta);
-      Release(&m_delv_eta) ;
-      Release(&m_delv_xi)  ;
-   }
-
-   void AllocateStrains(Int_t numElem)
-   {
-      m_dxx = Allocate<Real_t>(numElem) ;
-      m_dyy = Allocate<Real_t>(numElem) ;
-      m_dzz = Allocate<Real_t>(numElem) ;
-   }
-
-   void DeallocateStrains()
-   {
-      Release(&m_dzz) ;
-      Release(&m_dyy) ;
-      Release(&m_dxx) ;
-   }
-   
-   //
-   // ACCESSORS
-   //
-
-   // Node-centered
-
-   // Nodal coordinates
-   Real_t& x(Index_t idx)    { return m_x[idx] ; }
-   Real_t& y(Index_t idx)    { return m_y[idx] ; }
-   Real_t& z(Index_t idx)    { return m_z[idx] ; }
-
-   // Nodal velocities
-   Real_t& xd(Index_t idx)   { return m_xd[idx] ; }
-   Real_t& yd(Index_t idx)   { return m_yd[idx] ; }
-   Real_t& zd(Index_t idx)   { return m_zd[idx] ; }
-
-   // Nodal accelerations
-   Real_t& xdd(Index_t idx)  { return m_xdd[idx] ; }
-   Real_t& ydd(Index_t idx)  { return m_ydd[idx] ; }
-   Real_t& zdd(Index_t idx)  { return m_zdd[idx] ; }
-
-   // Nodal forces
-   Real_t& fx(Index_t idx)   { return m_fx[idx] ; }
-   Real_t& fy(Index_t idx)   { return m_fy[idx] ; }
-   Real_t& fz(Index_t idx)   { return m_fz[idx] ; }
-
-   // Nodal mass
-   Real_t& nodalMass(Index_t idx) { return m_nodalMass[idx] ; }
-
-   // Nodes on symmertry planes
-   Index_t symmX(Index_t idx) { return m_symmX[idx] ; }
-   Index_t symmY(Index_t idx) { return m_symmY[idx] ; }
-   Index_t symmZ(Index_t idx) { return m_symmZ[idx] ; }
-   bool symmXempty()          { return m_symmX.empty(); }
-   bool symmYempty()          { return m_symmY.empty(); }
-   bool symmZempty()          { return m_symmZ.empty(); }
-
-   //
-   // Element-centered
-   //
-   Index_t&  regElemSize(Index_t idx) { return m_regElemSize[idx] ; }
-   Index_t&  regNumList(Index_t idx) { return m_regNumList[idx] ; }
-   Index_t*  regNumList()            { return &m_regNumList[0] ; }
-   Index_t*  regElemlist(Int_t r)    { return m_regElemlist[r] ; }
-   Index_t&  regElemlist(Int_t r, Index_t idx) { return m_regElemlist[r][idx] ; }
-
-   Index_t*  nodelist(Index_t idx)    { return &m_nodelist[Index_t(8)*idx] ; }
-
-   // elem connectivities through face
-   Index_t&  lxim(Index_t idx) { return m_lxim[idx] ; }
-   Index_t&  lxip(Index_t idx) { return m_lxip[idx] ; }
-   Index_t&  letam(Index_t idx) { return m_letam[idx] ; }
-   Index_t&  letap(Index_t idx) { return m_letap[idx] ; }
-   Index_t&  lzetam(Index_t idx) { return m_lzetam[idx] ; }
-   Index_t&  lzetap(Index_t idx) { return m_lzetap[idx] ; }
-
-   // elem face symm/free-surface flag
-   Int_t&  elemBC(Index_t idx) { return m_elemBC[idx] ; }
-
-   // Principal strains - temporary
-   Real_t& dxx(Index_t idx)  { return m_dxx[idx] ; }
-   Real_t& dyy(Index_t idx)  { return m_dyy[idx] ; }
-   Real_t& dzz(Index_t idx)  { return m_dzz[idx] ; }
-
-   // New relative volume - temporary
-   Real_t& vnew(Index_t idx)  { return m_vnew[idx] ; }
-
-   // Velocity gradient - temporary
-   Real_t& delv_xi(Index_t idx)    { return m_delv_xi[idx] ; }
-   Real_t& delv_eta(Index_t idx)   { return m_delv_eta[idx] ; }
-   Real_t& delv_zeta(Index_t idx)  { return m_delv_zeta[idx] ; }
-
-   // Position gradient - temporary
-   Real_t& delx_xi(Index_t idx)    { return m_delx_xi[idx] ; }
-   Real_t& delx_eta(Index_t idx)   { return m_delx_eta[idx] ; }
-   Real_t& delx_zeta(Index_t idx)  { return m_delx_zeta[idx] ; }
-
-   // Energy
-   Real_t& e(Index_t idx)          { return m_e[idx] ; }
-
-   // Pressure
-   Real_t& p(Index_t idx)          { return m_p[idx] ; }
-
-   // Artificial viscosity
-   Real_t& q(Index_t idx)          { return m_q[idx] ; }
-
-   // Linear term for q
-   Real_t& ql(Index_t idx)         { return m_ql[idx] ; }
-   // Quadratic term for q
-   Real_t& qq(Index_t idx)         { return m_qq[idx] ; }
-
-   // Relative volume
-   Real_t& v(Index_t idx)          { return m_v[idx] ; }
-   Real_t& delv(Index_t idx)       { return m_delv[idx] ; }
-
-   // Reference volume
-   Real_t& volo(Index_t idx)       { return m_volo[idx] ; }
-
-   // volume derivative over volume
-   Real_t& vdov(Index_t idx)       { return m_vdov[idx] ; }
-
-   // Element characteristic length
-   Real_t& arealg(Index_t idx)     { return m_arealg[idx] ; }
-
-   // Sound speed
-   Real_t& ss(Index_t idx)         { return m_ss[idx] ; }
-
-   // Element mass
-   Real_t& elemMass(Index_t idx)  { return m_elemMass[idx] ; }
-
-   Index_t nodeElemCount(Index_t idx)
-   { return m_nodeElemStart[idx+1] - m_nodeElemStart[idx] ; }
-
-   Index_t *nodeElemCornerList(Index_t idx)
-   { return &m_nodeElemCornerList[m_nodeElemStart[idx]] ; }
-
-   // Parameters 
-
-   // Cutoffs
-   Real_t u_cut() const               { return m_u_cut ; }
-   Real_t e_cut() const               { return m_e_cut ; }
-   Real_t p_cut() const               { return m_p_cut ; }
-   Real_t q_cut() const               { return m_q_cut ; }
-   Real_t v_cut() const               { return m_v_cut ; }
-
-   // Other constants (usually are settable via input file in real codes)
-   Real_t hgcoef() const              { return m_hgcoef ; }
-   Real_t qstop() const               { return m_qstop ; }
-   Real_t monoq_max_slope() const     { return m_monoq_max_slope ; }
-   Real_t monoq_limiter_mult() const  { return m_monoq_limiter_mult ; }
-   Real_t ss4o3() const               { return m_ss4o3 ; }
-   Real_t qlc_monoq() const           { return m_qlc_monoq ; }
-   Real_t qqc_monoq() const           { return m_qqc_monoq ; }
-   Real_t qqc() const                 { return m_qqc ; }
-
-   Real_t eosvmax() const             { return m_eosvmax ; }
-   Real_t eosvmin() const             { return m_eosvmin ; }
-   Real_t pmin() const                { return m_pmin ; }
-   Real_t emin() const                { return m_emin ; }
-   Real_t dvovmax() const             { return m_dvovmax ; }
-   Real_t refdens() const             { return m_refdens ; }
-
-   // Timestep controls, etc...
-   Real_t& time()                 { return m_time ; }
-   Real_t& deltatime()            { return m_deltatime ; }
-   Real_t& deltatimemultlb()      { return m_deltatimemultlb ; }
-   Real_t& deltatimemultub()      { return m_deltatimemultub ; }
-   Real_t& stoptime()             { return m_stoptime ; }
-   Real_t& dtcourant()            { return m_dtcourant ; }
-   Real_t& dthydro()              { return m_dthydro ; }
-   Real_t& dtmax()                { return m_dtmax ; }
-   Real_t& dtfixed()              { return m_dtfixed ; }
-
-   Int_t&  cycle()                { return m_cycle ; }
-   Index_t&  numRanks()           { return m_numRanks ; }
-
-   Index_t&  colLoc()             { return m_colLoc ; }
-   Index_t&  rowLoc()             { return m_rowLoc ; }
-   Index_t&  planeLoc()           { return m_planeLoc ; }
-   Index_t&  tp()                 { return m_tp ; }
-
-   Index_t&  sizeX()              { return m_sizeX ; }
-   Index_t&  sizeY()              { return m_sizeY ; }
-   Index_t&  sizeZ()              { return m_sizeZ ; }
-   Index_t&  numReg()             { return m_numReg ; }
-   Int_t&  cost()             { return m_cost ; }
-   Index_t&  numElem()            { return m_numElem ; }
-   Index_t&  numNode()            { return m_numNode ; }
-   
-   Index_t&  maxPlaneSize()       { return m_maxPlaneSize ; }
-   Index_t&  maxEdgeSize()        { return m_maxEdgeSize ; }
-   
-   //
-   // MPI-Related additional data
-   //
-
-#if USE_MPI   
-   // Communication Work space 
-   Real_t *commDataSend ;
-   Real_t *commDataRecv ;
-   
-   // Maximum number of block neighbors 
-   MPI_Request recvRequest[26] ; // 6 faces + 12 edges + 8 corners 
-   MPI_Request sendRequest[26] ; // 6 faces + 12 edges + 8 corners 
-#endif
-
-  private:
-
-   void BuildMesh(Int_t nx, Int_t edgeNodes, Int_t edgeElems);
-   void SetupThreadSupportStructures();
-   void CreateRegionIndexSets(Int_t nreg, Int_t balance);
-   void SetupCommBuffers(Int_t edgeNodes);
-   void SetupSymmetryPlanes(Int_t edgeNodes);
-   void SetupElementConnectivities(Int_t edgeElems);
-   void SetupBoundaryConditions(Int_t edgeElems);
-
-   //
-   // IMPLEMENTATION
-   //
-
-   /* Node-centered */
-   std::vector<Real_t> m_x ;  /* coordinates */
-   std::vector<Real_t> m_y ;
-   std::vector<Real_t> m_z ;
-
-   std::vector<Real_t> m_xd ; /* velocities */
-   std::vector<Real_t> m_yd ;
-   std::vector<Real_t> m_zd ;
-
-   std::vector<Real_t> m_xdd ; /* accelerations */
-   std::vector<Real_t> m_ydd ;
-   std::vector<Real_t> m_zdd ;
-
-   std::vector<Real_t> m_fx ;  /* forces */
-   std::vector<Real_t> m_fy ;
-   std::vector<Real_t> m_fz ;
-
-   std::vector<Real_t> m_nodalMass ;  /* mass */
-
-   std::vector<Index_t> m_symmX ;  /* symmetry plane nodesets */
-   std::vector<Index_t> m_symmY ;
-   std::vector<Index_t> m_symmZ ;
-
-   // Element-centered
-
-   // Region information
-   Int_t    m_numReg ;
-   Int_t    m_cost; //imbalance cost
-   Index_t *m_regElemSize ;   // Size of region sets
-   Index_t *m_regNumList ;    // Region number per domain element
-   Index_t **m_regElemlist ;  // region indexset 
-
-   std::vector<Index_t>  m_nodelist ;     /* elemToNode connectivity */
-
-   std::vector<Index_t>  m_lxim ;  /* element connectivity across each face */
-   std::vector<Index_t>  m_lxip ;
-   std::vector<Index_t>  m_letam ;
-   std::vector<Index_t>  m_letap ;
-   std::vector<Index_t>  m_lzetam ;
-   std::vector<Index_t>  m_lzetap ;
-
-   std::vector<Int_t>    m_elemBC ;  /* symmetry/free-surface flags for each elem face */
-
-   Real_t             *m_dxx ;  /* principal strains -- temporary */
-   Real_t             *m_dyy ;
-   Real_t             *m_dzz ;
-
-   Real_t             *m_delv_xi ;    /* velocity gradient -- temporary */
-   Real_t             *m_delv_eta ;
-   Real_t             *m_delv_zeta ;
-
-   Real_t             *m_delx_xi ;    /* coordinate gradient -- temporary */
-   Real_t             *m_delx_eta ;
-   Real_t             *m_delx_zeta ;
-   
-   std::vector<Real_t> m_e ;   /* energy */
-
-   std::vector<Real_t> m_p ;   /* pressure */
-   std::vector<Real_t> m_q ;   /* q */
-   std::vector<Real_t> m_ql ;  /* linear term for q */
-   std::vector<Real_t> m_qq ;  /* quadratic term for q */
-
-   std::vector<Real_t> m_v ;     /* relative volume */
-   std::vector<Real_t> m_volo ;  /* reference volume */
-   std::vector<Real_t> m_vnew ;  /* new relative volume -- temporary */
-   std::vector<Real_t> m_delv ;  /* m_vnew - m_v */
-   std::vector<Real_t> m_vdov ;  /* volume derivative over volume */
-
-   std::vector<Real_t> m_arealg ;  /* characteristic length of an element */
-   
-   std::vector<Real_t> m_ss ;      /* "sound speed" */
-
-   std::vector<Real_t> m_elemMass ;  /* mass */
-
-   // Cutoffs (treat as constants)
-   const Real_t  m_e_cut ;             // energy tolerance 
-   const Real_t  m_p_cut ;             // pressure tolerance 
-   const Real_t  m_q_cut ;             // q tolerance 
-   const Real_t  m_v_cut ;             // relative volume tolerance 
-   const Real_t  m_u_cut ;             // velocity tolerance 
-
-   // Other constants (usually setable, but hardcoded in this proxy app)
-
-   const Real_t  m_hgcoef ;            // hourglass control 
-   const Real_t  m_ss4o3 ;
-   const Real_t  m_qstop ;             // excessive q indicator 
-   const Real_t  m_monoq_max_slope ;
-   const Real_t  m_monoq_limiter_mult ;
-   const Real_t  m_qlc_monoq ;         // linear term coef for q 
-   const Real_t  m_qqc_monoq ;         // quadratic term coef for q 
-   const Real_t  m_qqc ;
-   const Real_t  m_eosvmax ;
-   const Real_t  m_eosvmin ;
-   const Real_t  m_pmin ;              // pressure floor 
-   const Real_t  m_emin ;              // energy floor 
-   const Real_t  m_dvovmax ;           // maximum allowable volume change 
-   const Real_t  m_refdens ;           // reference density 
-
-   // Variables to keep track of timestep, simulation time, and cycle
-   Real_t  m_dtcourant ;         // courant constraint 
-   Real_t  m_dthydro ;           // volume change constraint 
-   Int_t   m_cycle ;             // iteration count for simulation 
-   Real_t  m_dtfixed ;           // fixed time increment 
-   Real_t  m_time ;              // current time 
-   Real_t  m_deltatime ;         // variable time increment 
-   Real_t  m_deltatimemultlb ;
-   Real_t  m_deltatimemultub ;
-   Real_t  m_dtmax ;             // maximum allowable time increment 
-   Real_t  m_stoptime ;          // end time for simulation 
-
-
-   Int_t   m_numRanks ;
-
-   Index_t m_colLoc ;
-   Index_t m_rowLoc ;
-   Index_t m_planeLoc ;
-   Index_t m_tp ;
-
-   Index_t m_sizeX ;
-   Index_t m_sizeY ;
-   Index_t m_sizeZ ;
-   Index_t m_numElem ;
-   Index_t m_numNode ;
-
-   Index_t m_maxPlaneSize ;
-   Index_t m_maxEdgeSize ;
-
-   // OMP hack 
-   Index_t *m_nodeElemStart ;
-   Index_t *m_nodeElemCornerList ;
-
-   // Used in setup
-   Index_t m_rowMin, m_rowMax;
-   Index_t m_colMin, m_colMax;
-   Index_t m_planeMin, m_planeMax ;
-
-} ;
-
-typedef Real_t &(Domain::* Domain_member )(Index_t) ;
-
-struct cmdLineOpts {
-   Int_t its; // -i 
-   Int_t nx;  // -s 
-   Int_t numReg; // -r 
-   Int_t numFiles; // -f
-   Int_t showProg; // -p
-   Int_t quiet; // -q
-   Int_t viz; // -v 
-   Int_t cost; // -c
-   Int_t balance; // -b
-};
-
-
-
-// Function Prototypes
-
-// lulesh-par
-Real_t CalcElemVolume( const Real_t x[8],
-                       const Real_t y[8],
-                       const Real_t z[8]);
-
-// lulesh-util
-void ParseCommandLineOptions(int argc, char *argv[],
-                             Int_t myRank, struct cmdLineOpts *opts);
-void VerifyAndWriteFinalOutput(Real_t elapsed_time,
-                               Domain& locDom,
-                               Int_t nx,
-                               Int_t numRanks);
-
-// lulesh-viz
-void DumpToVisit(Domain& domain, int numFiles, int myRank, int numRanks);
-
-// lulesh-comm
-void CommRecv(Domain& domain, Int_t msgType, Index_t xferFields,
-              Index_t dx, Index_t dy, Index_t dz,
-              bool doRecv, bool planeOnly);
-void CommSend(Domain& domain, Int_t msgType,
-              Index_t xferFields, Domain_member *fieldData,
-              Index_t dx, Index_t dy, Index_t dz,
+#define CACHE_ALIGN_REAL(n)                                                    \
+  (((n) + (CACHE_COHERENCE_PAD_REAL - 1)) & ~(CACHE_COHERENCE_PAD_REAL - 1))
+
+// MPI Message Tags
+#define MSG_COMM_SBN 1024
+#define MSG_SYNC_POS_VEL 2048
+#define MSG_MONOQ 3072
+
+#define MAX_FIELDS_PER_MPI_COMM 6
+
+// cpu-comms
+void CommRecv(Domain& domain, Int_t msgType, Index_t xferFields, Index_t dx,
+              Index_t dy, Index_t dz, bool doRecv, bool planeOnly);
+void CommSend(Domain& domain, Int_t msgType, Index_t xferFields,
+              Domain_member* fieldData, Index_t dx, Index_t dy, Index_t dz,
               bool doSend, bool planeOnly);
-void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData);
+void CommSBN(Domain& domain, Int_t xferFields, Domain_member* fieldData);
 void CommSyncPosVel(Domain& domain);
 void CommMonoQ(Domain& domain);
 
-// lulesh-init
-void InitMeshDecomp(Int_t numRanks, Int_t myRank,
-                    Int_t *col, Int_t *row, Int_t *plane, Int_t *side);
+// gpu-comms
+void CommSendGpu(Domain& domain, Int_t msgType, Index_t xferFields,
+                 Domain_member* fieldData, Index_t dx, Index_t dy, Index_t dz,
+                 bool doSend, bool planeOnly, cudaStream_t stream);
+void CommSBNGpu(Domain& domain, Int_t xferFields, Domain_member* fieldData,
+                cudaStream_t* streams);
+void CommSyncPosVelGpu(Domain& domain, cudaStream_t* streams);
+void CommMonoQGpu(Domain& domain, cudaStream_t stream);
+
+__attribute__((device)) void
+Inner_ApplyMaterialPropertiesAndUpdateVolume_kernel_grad_14(
+    Index_t length, Real_t rho0, Real_t e_cut, Real_t emin,
+    const Real_t* __restrict ql, const Real_t* __restrict qq,
+    const Real_t* __restrict vnew, const Real_t* __restrict v, Real_t pmin,
+    Real_t p_cut, Real_t q_cut, Real_t eosvmin, Real_t eosvmax,
+    const Index_t* __restrict regElemlist, Real_t* __restrict e,
+    const Real_t* __restrict delv, const Real_t* __restrict p,
+    const Real_t* __restrict q, Real_t ss4o3, const Real_t* __restrict ss,
+    Real_t v_cut, const Index_t* __restrict bad_vol, const Int_t cost,
+    const Index_t* __restrict regCSR, const Index_t* __restrict regReps,
+    const Index_t numReg, Real_t* _d_e);
+
+__device__ inline real4 SQRT(real4 arg) { return sqrtf(arg); }
+__device__ inline real8 SQRT(real8 arg) { return sqrt(arg); }
+
+__device__ inline real4 CBRT(real4 arg) { return cbrtf(arg); }
+__device__ inline real8 CBRT(real8 arg) { return cbrt(arg); }
+
+__device__ __host__ inline real4 FABS(real4 arg) { return fabsf(arg); }
+__device__ __host__ inline real8 FABS(real8 arg) { return fabs(arg); }
+
+__device__ inline real4 FMAX(real4 arg1, real4 arg2) {
+  return fmaxf(arg1, arg2);
+}
+__device__ inline real8 FMAX(real8 arg1, real8 arg2) {
+  return fmax(arg1, arg2);
+}
+
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
+
+/* Stuff needed for boundary conditions */
+/* 2 BCs on each of 6 hexahedral faces (12 bits) */
+#define XI_M 0x00007
+#define XI_M_SYMM 0x00001
+#define XI_M_FREE 0x00002
+#define XI_M_COMM 0x00004
+
+#define XI_P 0x00038
+#define XI_P_SYMM 0x00008
+#define XI_P_FREE 0x00010
+#define XI_P_COMM 0x00020
+
+#define ETA_M 0x001c0
+#define ETA_M_SYMM 0x00040
+#define ETA_M_FREE 0x00080
+#define ETA_M_COMM 0x00100
+
+#define ETA_P 0x00e00
+#define ETA_P_SYMM 0x00200
+#define ETA_P_FREE 0x00400
+#define ETA_P_COMM 0x00800
+
+#define ZETA_M 0x07000
+#define ZETA_M_SYMM 0x01000
+#define ZETA_M_FREE 0x02000
+#define ZETA_M_COMM 0x04000
+
+#define ZETA_P 0x38000
+#define ZETA_P_SYMM 0x08000
+#define ZETA_P_FREE 0x10000
+#define ZETA_P_COMM 0x20000
+
+#define VOLUDER(a0, a1, a2, a3, a4, a5, b0, b1, b2, b3, b4, b5, dvdc)          \
+  {                                                                            \
+    const Real_t twelfth = Real_t(1.0) / Real_t(12.0);                         \
+                                                                               \
+    dvdc = ((a1) + (a2)) * ((b0) + (b1)) - ((a0) + (a1)) * ((b1) + (b2)) +     \
+           ((a0) + (a4)) * ((b3) + (b4)) - ((a3) + (a4)) * ((b0) + (b4)) -     \
+           ((a2) + (a5)) * ((b3) + (b5)) + ((a3) + (a5)) * ((b2) + (b5));      \
+    dvdc *= twelfth;                                                           \
+  }
+
+__device__ void CalcPressureForElems_device(Real_t& p_new, Real_t& bvc,
+                                            Real_t& pbvc, Real_t e_old,
+                                            Real_t compression, Real_t vnewc,
+                                            Real_t pmin, Real_t p_cut,
+                                            Real_t eosvmax);
+
+__device__ void
+ApplyMaterialPropertiesForElems_device(Real_t eosvmin, Real_t eosvmax,
+#ifdef RESTRICT
+                                       const Real_t* __restrict__ vnew,
+                                       const Real_t* __restrict__ v,
+#else
+                                       const Real_t* vnew, const Real_t* v,
+#endif
+                                       Real_t& vnewc,
+#ifdef RESTRICT
+                                       const Index_t* __restrict__ bad_vol,
+#else
+                                       const Index_t* bad_vol,
+#endif
+                                       Index_t zn);
+
+__device__ Index_t giveMyRegion(const Index_t* regCSR, const Index_t i,
+                                const Index_t numReg);
+
+__device__ void CalcEnergyForElems_device(
+    Real_t& p_new, Real_t& e_new, Real_t& q_new, Real_t& bvc, Real_t& pbvc,
+    Real_t p_old, Real_t e_old, Real_t q_old, Real_t compression,
+    Real_t compHalfStep, Real_t vnewc, Real_t work, Real_t delvc, Real_t pmin,
+    Real_t p_cut, Real_t e_cut, Real_t q_cut, Real_t emin, Real_t qq, Real_t ql,
+    Real_t rho0, Real_t eosvmax, Index_t length);
+
+__device__ void CalcSoundSpeedForElems_device(Real_t vnewc, Real_t rho0,
+                                              Real_t enewc, Real_t pnewc,
+                                              Real_t pbvc, Real_t bvc,
+                                              Real_t ss4o3, Index_t nz,
+#ifdef RESTRICT
+                                              const Real_t* __restrict__ ss,
+#else
+                                              const Real_t* ss,
+#endif
+                                              Index_t iz);
+
+__device__ void UpdateVolumesForElems_device(Index_t numElem, Real_t v_cut,
+                                             const Real_t* vnew,
+                                             const Real_t* v, int i);
